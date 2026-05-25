@@ -565,13 +565,18 @@ def _multiplier_color(multiplier: float) -> str:
     if abs(value - 1.0) < 1e-9:
         return "rgb(203, 213, 225)"  # grau/weiß
 
+    if value >= 4.0:
+        return "rgb(22, 101, 52)"  # x4: dunkles grün
+
+    if value >= 2.0:
+        return "rgb(74, 222, 128)"  # x2: helleres grün
+
     if value > 1.0:
-        # von hellgrün (x2) zu kräftigerem grün (x4)
-        clamped = min(4.0, value)
-        ratio = (clamped - 1.0) / 3.0
-        red = int(134 + (34 - 134) * ratio)
-        green = int(239 + (197 - 239) * ratio)
-        blue = int(172 + (94 - 172) * ratio)
+        # Übergang zwischen x1 und x2 (sehr hell -> hellgrün)
+        ratio = value - 1.0
+        red = int(203 + (74 - 203) * ratio)
+        green = int(213 + (222 - 213) * ratio)
+        blue = int(225 + (128 - 225) * ratio)
         return f"rgb({red}, {green}, {blue})"
 
     # z. B. 0.25
