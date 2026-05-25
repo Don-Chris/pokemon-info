@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pokedex UI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="page">
+    <header class="hero">
+      <div class="hero-text">
+        <p class="kicker"><a href="https://pokeapi.co" target="_blank" rel="noopener">Powered by PokeAPI</a></p>
+        <h1>Pokedex Explorer</h1>
+        <p class="lead">Name und optional Level eingeben — du siehst Fangrate, Sprite, Attacken und Typ-Informationen.</p>
+      </div>
+      <div class="select-row">
+        <label>
+          Generation
+          <select id="generation-select">
+            {% for gen in generations %}
+              <option value="{{ gen }}" {% if gen == generation %}selected{% endif %}>{{ gen }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>
+          Version Group
+          <select id="version-group-select">
+            {% for vg in version_groups %}
+              <option value="{{ vg }}" {% if vg == version_group %}selected{% endif %}>{{ vg }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+      <div class="hero-card">
+        <form method="get" class="search">
+          <input type="hidden" name="generation" id="generation-hidden" value="{{ generation }}" />
+          <input type="hidden" name="version_group" id="version-group-hidden" value="{{ version_group }}" />
+          <label>
+            Pokemonname
+            <input name="name" placeholder="z.B. Pikachu" value="{{ name }}" list="pokemon-suggestions" autocomplete="off" id="pokemon-input" />
+            <datalist id="pokemon-suggestions"></datalist>
+          </label>
+          <label>
+            Level (optional)
+            <input name="level" placeholder="leer = bis 100" value="{{ level }}" />
+          </label>
+          <button type="submit">Suchen</button>
+        </form>
+        {% if error %}
+          <div class="error">{{ error }}</div>
+        {% endif %}
+      </div>
+    </header>
+
+    {% if pokemon %}
+    <section class="summary">
+      <div class="summary-card">
+        <div class="summary-info">
+          <h2>
+            {{ pokemon.display_name }}
+            {% if pokemon.pokewiki_url %}
+              <a class="external-link" href="{{ pokemon.pokewiki_url }}" target="_blank" rel="noopener" title="PokéWiki Eintrag">🔗</a>
+            {% endif %}
+          </h2>
+          {% if pokemon.english_name %}
+            <p class="pokemon-english"><em>{{ pokemon.english_name }}</em></p>
+          {% endif %}
+          <p>Fangrate: <strong style="color: {{ pokemon.capture_rate_color }}">{{ pokemon.capture_rate }}</strong></p>
+          {% if pokemon.pokedex_entry %}
+            <p>{{ pokemon.pokedex_entry }}</p>
+          {% endif %}
+          <div class="type-inline">
+            <span>Typen:</span>
+            {% for item in pokemon.types %}
+              <span class="type-pill">
+                {% if item.sprite %}
+                  <img src="{{ item.sprite }}" alt="{{ item.type }}" />
+                {% endif %}
+                <small>{{ item.type }}</small>
+              </span>
+            {% endfor %}
+          </div>
+        </div>
+        {% if pokemon.sprite %}
+          <img src="{{ pokemon.sprite }}" alt="Sprite" class="sprite" />
+        {% endif %}
+      </div>
+
+      {% if evolution_chain %}
+      <div class="evolution-card">
+        <h2 title="Zeigt die Entwicklungsreihe dieses Pokémons">Entwicklungen</h2>
+        <div class="evolution-row">
+          {% for evo in evolution_chain %}
+            <a class="evolution-item" href="/?name={{ evo.query_name }}&level={{ level }}&generation={{ generation }}&version_group={{ version_group }}">
+              {% if evo.sprite %}
+                <img src="{{ evo.sprite }}" alt="{{ evo.name }}" />
+              {% endif %}
+              <span>{{ evo.name }}</span>
+              {% if not evo.is_base and evo.level is not none %}
+                <small>Level {{ evo.level }}</small>
+              {% endif %}
+            </a>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+
+      <div class="type-panels">
+        <div class="panel">
+          <h2 title="Zeigt die Effektivität von Angriffs-Typen (Multiplikatoren)">Typen bei Angriff</h2>
+          <div class="type-grid">
+            {% for item in effective_types %}
+              <div class="type-chip" style="border-color: {{ item.strength_color }}; box-shadow: inset 0 0 0 1px {{ item.strength_color }};">
+                {% if item.sprite %}
+                  <img src="{{ item.sprite }}" alt="{{ item.type }}" />
+                {% endif %}
+                <span>{{ item.type }}</span>
+                <small style="color: {{ item.strength_color }}">x{{ '%.1f'|format(item.multiplier) }}</small>
+              </div>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="panel">
+          <h2 title="Zeigt Typen, die durch die gewählten Attacken am stärksten gefährdet sind">Stärkste Bedrohungen</h2>
+          <div class="type-grid">
+            {% for item in dangerous_types %}
+              <div class="type-chip">
+                {% if item.sprite %}
+                  <img src="{{ item.sprite }}" alt="{{ item.type }}" />
+                {% endif %}
+                <span>{{ item.type }}</span>
+                <small>{{ item.count }} Treffer</small>
+                {% if item.moves %}
+                  <small class="danger-moves">
+                    {% for move in item.moves %}
+                      <span title="{{ move.english_name }}">{{ move.name }}</span>{% if not loop.last %}, {% endif %}
+                    {% endfor %}
+                  </small>
+                {% endif %}
+              </div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="moves">
+      <h2 title="Alle Attacken; die zuletzt gelernten Attacken bis zum angegebenen Level werden hervorgehoben">Attacken (nach Level)</h2>
+      <div class="table-wrap">
+        <table class="sortable" id="moves-table">
+          <thead>
+            <tr>
+              <th data-sort="number">Level</th>
+              <th data-sort="text">Attacke</th>
+              <th data-sort="text">Typ</th>
+              <th data-sort="number">Power</th>
+              <th data-sort="number">Accuracy</th>
+              <th data-sort="number">PP</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for move in moves %}
+              <tr class="{% if move.highlight %}highlighted-move{% endif %}">
+                <td data-sort-value="{{ move.level }}">{{ move.level }}</td>
+                <td data-sort-value="{{ move.name }}" title="{{ move.english_name }}">{{ move.name }} {% if move.pokewiki_url %}<a class="external-link" href="{{ move.pokewiki_url }}" target="_blank" rel="noopener" title="PokéWiki Eintrag">🔗</a>{% endif %}</td>
+                <td data-sort-value="{{ move.type }}">
+                  {% if move.type_sprite %}
+                    <img src="{{ move.type_sprite }}" alt="{{ move.type }}" class="type-icon" />
+                  {% else %}
+                    {{ move.type }}
+                  {% endif %}
+                </td>
+                <td data-sort-value="{{ move.power if move.power is not none else -1 }}">
+                  {{ move.power if move.power is not none else '-' }}
+                </td>
+                <td data-sort-value="{{ move.accuracy if move.accuracy is not none else -1 }}">
+                  {{ move.accuracy if move.accuracy is not none else '-' }}
+                </td>
+                <td data-sort-value="{{ move.pp if move.pp is not none else -1 }}">
+                  {{ move.pp if move.pp is not none else '-' }}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    {% endif %}
+  </div>
+  <footer class="site-footer">Created by Schulte 2026</footer>
+  <script>
+    const generationSelect = document.getElementById("generation-select");
+    const versionGroupSelect = document.getElementById("version-group-select");
+    const generationHidden = document.getElementById("generation-hidden");
+    const versionGroupHidden = document.getElementById("version-group-hidden");
+    const pokemonInput = document.getElementById("pokemon-input");
+    const suggestionList = document.getElementById("pokemon-suggestions");
+
+    const syncQueryParamsToForm = () => {
+      if (generationHidden && generationSelect) {
+        generationHidden.value = generationSelect.value || "";
+      }
+      if (versionGroupHidden && versionGroupSelect) {
+        versionGroupHidden.value = versionGroupSelect.value || "";
+      }
+      syncBrowserUrlWithSelections();
+    };
+
+    const syncBrowserUrlWithSelections = () => {
+      if (!window?.history?.replaceState) {
+        return;
+      }
+      const url = new URL(window.location.href);
+      const generationValue = generationSelect?.value || "";
+      const versionGroupValue = versionGroupSelect?.value || "";
+
+      if (generationValue) {
+        url.searchParams.set("generation", generationValue);
+      } else {
+        url.searchParams.delete("generation");
+      }
+
+      if (versionGroupValue) {
+        url.searchParams.set("version_group", versionGroupValue);
+      } else {
+        url.searchParams.delete("version_group");
+      }
+
+      const query = url.searchParams.toString();
+      const nextUrl = query ? `${url.pathname}?${query}${url.hash}` : `${url.pathname}${url.hash}`;
+      window.history.replaceState({}, "", nextUrl);
+    };
+
+    const updateVersionGroups = async (generation) => {
+      const response = await fetch(`/version-groups?generation=${encodeURIComponent(generation)}`);
+      const payload = await response.json();
+      const currentValue = versionGroupSelect.value;
+      versionGroupSelect.innerHTML = "";
+      for (const item of payload.results || []) {
+        const option = document.createElement("option");
+        option.value = item;
+        option.textContent = item;
+        if (item === currentValue) {
+          option.selected = true;
+        }
+        versionGroupSelect.appendChild(option);
+      }
+      if (!versionGroupSelect.value && versionGroupSelect.options.length) {
+        versionGroupSelect.selectedIndex = 0;
+      }
+      syncQueryParamsToForm();
+    };
+
+    generationSelect?.addEventListener("change", async (event) => {
+      const value = event.target.value;
+      syncQueryParamsToForm();
+      suggestionList.innerHTML = "";
+      await updateVersionGroups(value);
+    });
+
+    versionGroupSelect?.addEventListener("change", (event) => {
+      syncQueryParamsToForm();
+    });
+
+    syncQueryParamsToForm();
+
+    let debounceId = null;
+    pokemonInput?.addEventListener("input", (event) => {
+      const value = event.target.value.trim();
+      if (debounceId) {
+        clearTimeout(debounceId);
+      }
+      debounceId = setTimeout(async () => {
+        if (!value) {
+          suggestionList.innerHTML = "";
+          return;
+        }
+        const genValue = generationSelect?.value || "";
+        const response = await fetch(`/suggest?query=${encodeURIComponent(value)}&generation=${encodeURIComponent(genValue)}`);
+        const payload = await response.json();
+        suggestionList.innerHTML = "";
+        for (const item of payload.results || []) {
+          const option = document.createElement("option");
+          option.value = item;
+          suggestionList.appendChild(option);
+        }
+      }, 150);
+    });
+
+    const table = document.getElementById("moves-table");
+    if (table) {
+      const headers = table.querySelectorAll("th[data-sort]");
+      headers.forEach((header, index) => {
+        header.addEventListener("click", () => {
+          const sortType = header.dataset.sort;
+          const rows = Array.from(table.querySelectorAll("tbody tr"));
+          const isAscending = header.classList.toggle("ascending");
+          headers.forEach((h) => {
+            if (h !== header) {
+              h.classList.remove("ascending", "descending");
+            }
+          });
+          header.classList.toggle("descending", !isAscending);
+          rows.sort((a, b) => {
+            const aCell = a.children[index];
+            const bCell = b.children[index];
+            const aVal = aCell.dataset.sortValue ?? aCell.textContent;
+            const bVal = bCell.dataset.sortValue ?? bCell.textContent;
+            if (sortType === "number") {
+              const aNum = Number(aVal);
+              const bNum = Number(bVal);
+              return isAscending ? aNum - bNum : bNum - aNum;
+            }
+            return isAscending
+              ? String(aVal).localeCompare(String(bVal))
+              : String(bVal).localeCompare(String(aVal));
+          });
+          const tbody = table.querySelector("tbody");
+          rows.forEach((row) => tbody.appendChild(row));
+        });
+      });
+    }
+  </script>
+</body>
+</html>

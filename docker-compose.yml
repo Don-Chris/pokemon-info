@@ -1,0 +1,18 @@
+services:
+  pokeapi-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pokeapi-web
+    ports:
+      - "${POKEAPI_WEB_PORT:-8001}:8000"
+    environment:
+      POKEAPI_GENERATION: ${POKEAPI_GENERATION:-generation-i}
+      POKEAPI_VERSION_GROUP: ${POKEAPI_VERSION_GROUP:-red-blue}
+      POKEAPI_LANGUAGE: ${POKEAPI_LANGUAGE:-de}
+      UVICORN_LOG_LEVEL: ${UVICORN_LOG_LEVEL:-info}
+      APP_LOG_LEVEL: ${APP_LOG_LEVEL:-INFO}
+      POKEAPI_CACHE_PATH: /cache/pokeapi_cache.json
+    volumes:
+      - ./pokeapi-cache:/cache
+    restart: unless-stopped
