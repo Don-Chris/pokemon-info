@@ -38,6 +38,8 @@ _name_cache_by_generation: Dict[str, List[str]] = {}
 _name_cache_lc_by_generation: Dict[str, List[str]] = {}
 _name_cache_de_by_generation: Dict[str, List[str]] = {}
 _name_cache_de_lc_by_generation: Dict[str, List[str]] = {}
+_name_cache_en_by_generation: Dict[str, List[str]] = {}
+_name_cache_en_lc_by_generation: Dict[str, List[str]] = {}
 _name_to_identifier_by_generation: Dict[str, Dict[str, str]] = {}
 _localized_name_cache_ready_by_generation: Dict[str, bool] = {}
 _name_to_identifier_global: Optional[Dict[str, str]] = None
@@ -57,6 +59,72 @@ _GENERATION_NATDEX_CUTOFF: Dict[str, int] = {
 }
 
 base_api = PokeAPI(generation=APP_GENERATION, version_group=APP_VERSION_GROUP, language=APP_LANGUAGE)
+_SUPPORTED_LANGUAGES = ["de", "en"]
+
+_UI_TEXT: Dict[str, Dict[str, str]] = {
+    "de": {
+        "lead": "Name und optional Level eingeben — du siehst Fangrate, Sprite, Attacken und Typ-Informationen.",
+        "generation": "Generation",
+        "version_group": "Version Group",
+        "language": "Sprache",
+        "pokemon_name": "Pokemonname",
+        "name_placeholder": "z.B. Pikachu",
+        "level_label": "Level (optional)",
+        "level_placeholder": "leer = bis 100",
+        "search": "Suchen",
+        "capture_rate": "Fangrate",
+        "types": "Typen",
+        "evolutions": "Entwicklungen",
+        "evolutions_tooltip": "Zeigt die Entwicklungsreihe dieses Pokémons",
+        "attack_types": "Typen bei Angriff",
+        "attack_types_tooltip": "Zeigt die Effektivität von Angriffs-Typen (Multiplikatoren)",
+        "danger_title": "Stärkste Bedrohungen",
+        "danger_tooltip": "Zeigt Typen, die durch die gewählten Attacken am stärksten gefährdet sind",
+        "moves_title": "Attacken (nach Level)",
+        "moves_tooltip": "Alle Attacken; die zuletzt gelernten Attacken bis zum angegebenen Level werden hervorgehoben",
+        "level_short": "Level",
+        "pokewiki_entry": "PokéWiki Eintrag",
+        "table_level": "Level",
+        "table_move": "Attacke",
+        "table_type": "Typ",
+        "table_power": "Power",
+        "table_accuracy": "Accuracy",
+        "table_pp": "PP",
+        "hits": "Treffer",
+        "pokeapi": "Powered by PokeAPI",
+    },
+    "en": {
+        "lead": "Enter a name and optional level — you get capture rate, sprite, moves, and type info.",
+        "generation": "Generation",
+        "version_group": "Version group",
+        "language": "Language",
+        "pokemon_name": "Pokemon name",
+        "name_placeholder": "e.g. Pikachu",
+        "level_label": "Level (optional)",
+        "level_placeholder": "empty = up to 100",
+        "search": "Search",
+        "capture_rate": "Capture rate",
+        "types": "Types",
+        "evolutions": "Evolutions",
+        "evolutions_tooltip": "Shows the evolution chain for this Pokemon",
+        "attack_types": "Attack type multipliers",
+        "attack_types_tooltip": "Shows how effective attack types are (multipliers)",
+        "danger_title": "Top threats",
+        "danger_tooltip": "Shows types most threatened by the selected moves",
+        "moves_title": "Moves (by level)",
+        "moves_tooltip": "All moves; the most recently learned moves up to the given level are highlighted",
+        "level_short": "Level",
+        "pokewiki_entry": "PokéWiki entry",
+        "table_level": "Level",
+        "table_move": "Move",
+        "table_type": "Type",
+        "table_power": "Power",
+        "table_accuracy": "Accuracy",
+        "table_pp": "PP",
+        "hits": "hits",
+        "pokeapi": "Powered by PokeAPI",
+    },
+}
 logger.info(
     "App gestartet mit generation=%s, version_group=%s, language=%s",
     APP_GENERATION,
@@ -82,9 +150,13 @@ def index(
     level: Optional[str] = Query(default=None),
     generation: Optional[str] = Query(default=None),
     version_group: Optional[str] = Query(default=None),
+    language: Optional[str] = Query(default=None),
 ) -> HTMLResponse:
     selected_generation = generation or APP_GENERATION
     selected_version_group = version_group or APP_VERSION_GROUP
+    selected_language = (language or APP_LANGUAGE).lower()
+    if selected_language not in _SUPPORTED_LANGUAGES:
+        selected_language = APP_LANGUAGE
 
     logger.debug(
         "GET / mit name=%s level=%s generation=%s version_group=%s",
@@ -93,7 +165,7 @@ def index(
         selected_generation,
         selected_version_group,
     )
-    api = _get_api(selected_generation, selected_version_group, APP_LANGUAGE)
+    api = _get_api(selected_generation, selected_version_group, selected_language)
     generations = base_api.list_generations()
     version_groups = _get_version_groups_for_generation(selected_generation)
     data: Dict[str, Any] = {
@@ -109,6 +181,9 @@ def index(
         "effective_types": [],
         "dangerous_types": [],
         "evolution_chain": [],
+        "language": selected_language,
+        "languages": _SUPPORTED_LANGUAGES,
+        "ui": _UI_TEXT.get(selected_language, _UI_TEXT["de"]),
     }
 
     if not name:
@@ -117,12 +192,12 @@ def index(
     level_value = _parse_level(level)
 
     try:
-        resolved_name = _resolve_identifier(name, selected_generation, api=api)
+        resolved_name = _resolve_identifier(name, selected_generation, selected_language, api=api)
         pokemon_name = _get_display_name(api, resolved_name)
         capture_rate = _get_capture_rate(api, resolved_name)
         own_types = _get_pokemon_type_entries(api, resolved_name)
         sprite = api.get_pokemon_sprite(resolved_name, key="official_artwork") or api.get_pokemon_sprite(resolved_name)
-        pokedex_entry = _get_pokedex_entry(api, resolved_name, selected_version_group)
+        pokedex_entry = _get_pokedex_entry(api, resolved_name, selected_version_group, selected_language)
         english_name = _get_english_pokemon_name(api, resolved_name)
 
         # Fetch all moves (no level cap) and mark the last 4 moves the Pokémon can learn up to the given level
@@ -216,16 +291,25 @@ def version_groups(generation: str) -> JSONResponse:
 
 
 @app.get("/suggest", response_class=JSONResponse)
-def suggest(query: str = "", generation: Optional[str] = None) -> JSONResponse:
+def suggest(query: str = "", generation: Optional[str] = None, language: Optional[str] = None) -> JSONResponse:
     generation_value = generation or APP_GENERATION
+    language_value = (language or APP_LANGUAGE).lower()
+    if language_value not in _SUPPORTED_LANGUAGES:
+        language_value = APP_LANGUAGE
     if not query:
         return JSONResponse({"results": []})
-    # Ensure localized cache so first suggestions are German, not identifiers.
-    _ensure_localized_name_cache(generation_value)
+    if language_value == "de":
+        _ensure_localized_name_cache(generation_value, language_value)
+    else:
+        _ensure_name_cache(generation_value)
     query_lc = query.strip().lower()
     results: List[str] = []
-    names = _name_cache_de_by_generation.get(generation_value, [])
-    names_lc = _name_cache_de_lc_by_generation.get(generation_value, [])
+    if language_value == "de":
+        names = _name_cache_de_by_generation.get(generation_value, [])
+        names_lc = _name_cache_de_lc_by_generation.get(generation_value, [])
+    else:
+        names = _name_cache_en_by_generation.get(generation_value, [])
+        names_lc = _name_cache_en_lc_by_generation.get(generation_value, [])
     for name, name_lc in zip(names, names_lc):
         if name_lc.startswith(query_lc):
             results.append(name)
@@ -287,6 +371,8 @@ def _ensure_name_cache(generation: str) -> None:
         and generation in _name_cache_lc_by_generation
         and generation in _name_cache_de_by_generation
         and generation in _name_cache_de_lc_by_generation
+        and generation in _name_cache_en_by_generation
+        and generation in _name_cache_en_lc_by_generation
         and generation in _name_to_identifier_by_generation
     ):
         return
@@ -312,6 +398,8 @@ def _ensure_name_cache(generation: str) -> None:
 
     _name_cache_by_generation[generation] = names
     _name_cache_lc_by_generation[generation] = [name.lower() for name in names]
+    _name_cache_en_by_generation[generation] = display_names
+    _name_cache_en_lc_by_generation[generation] = [_normalize_name_key(name) for name in display_names]
     _name_cache_de_by_generation[generation] = display_names
     _name_cache_de_lc_by_generation[generation] = [_normalize_name_key(name) for name in display_names]
     _name_to_identifier_by_generation[generation] = name_map
@@ -363,7 +451,9 @@ def _get_species_identifiers_up_to_generation(generation: str) -> List[str]:
     return names
 
 
-def _ensure_localized_name_cache(generation: str) -> None:
+def _ensure_localized_name_cache(generation: str, language: str) -> None:
+    if language != "de":
+        return
     if _localized_name_cache_ready_by_generation.get(generation):
         return
 
@@ -383,7 +473,7 @@ def _ensure_localized_name_cache(generation: str) -> None:
     for idx, identifier in enumerate(names):
         try:
             species_data = base_api._get(f"pokemon-species/{identifier}")
-            localized_name = _pick_localized_name(species_data.get("names", []), identifier)
+            localized_name = _pick_localized_name(species_data.get("names", []), identifier, language)
         except HTTPError:
             localized_name = identifier
 
@@ -398,7 +488,7 @@ def _ensure_localized_name_cache(generation: str) -> None:
     logger.info("Lokalisierte Namenszuordnung für %s aufgebaut", generation)
 
 
-def _resolve_identifier(name: str, generation: str, api: Optional[PokeAPI] = None) -> str:
+def _resolve_identifier(name: str, generation: str, language: str, api: Optional[PokeAPI] = None) -> str:
     _ensure_name_cache(generation)
     mapping = _name_to_identifier_by_generation.get(generation, {})
     normalized = _normalize_name_key(name)
@@ -417,10 +507,11 @@ def _resolve_identifier(name: str, generation: str, api: Optional[PokeAPI] = Non
             pass
 
     # Langsamer Fallback nur bei Bedarf: pro Generation einmal deutsche Namen laden.
-    _ensure_localized_name_cache(generation)
-    mapping = _name_to_identifier_by_generation.get(generation, {})
-    if normalized in mapping:
-        return mapping[normalized]
+    if language == "de":
+        _ensure_localized_name_cache(generation, language)
+        mapping = _name_to_identifier_by_generation.get(generation, {})
+        if normalized in mapping:
+            return mapping[normalized]
 
     # Optionaler Fallback (deaktiviert per Default), falls man bewusst globale
     # Namensauflösung für exotische Eingaben aktivieren möchte.
@@ -432,9 +523,9 @@ def _resolve_identifier(name: str, generation: str, api: Optional[PokeAPI] = Non
     return direct_identifier
 
 
-def _pick_localized_name(names: List[Dict[str, Any]], fallback: str) -> str:
+def _pick_localized_name(names: List[Dict[str, Any]], fallback: str, language: str) -> str:
     for entry in names:
-        if entry.get("language", {}).get("name") == APP_LANGUAGE:
+        if entry.get("language", {}).get("name") == language:
             return entry.get("name", fallback)
     return fallback
 
@@ -584,7 +675,7 @@ def _multiplier_color(multiplier: float) -> str:
     return "rgb(251, 146, 60)"  # dunkleres orange
 
 
-def _get_pokedex_entry(api: PokeAPI, identifier: str, version_group: str) -> Optional[str]:
+def _get_pokedex_entry(api: PokeAPI, identifier: str, version_group: str, language: str) -> Optional[str]:
     try:
         species = api.get_pokemon_species(identifier)
     except HTTPError:
@@ -599,7 +690,7 @@ def _get_pokedex_entry(api: PokeAPI, identifier: str, version_group: str) -> Opt
 
     for entry in entries:
         lang = entry.get("language", {}).get("name")
-        if lang != APP_LANGUAGE:
+        if lang != language:
             continue
 
         text_raw = entry.get("flavor_text") or ""

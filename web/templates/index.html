@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="{{ language }}">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -14,13 +14,13 @@
   <div class="page">
     <header class="hero">
       <div class="hero-text">
-        <p class="kicker"><a href="https://pokeapi.co" target="_blank" rel="noopener">Powered by PokeAPI</a></p>
+        <p class="kicker"><a href="https://pokeapi.co" target="_blank" rel="noopener">{{ ui.pokeapi }}</a></p>
         <h1>Pokemon Info</h1>
-        <p class="lead">Name und optional Level eingeben — du siehst Fangrate, Sprite, Attacken und Typ-Informationen.</p>
+        <p class="lead">{{ ui.lead }}</p>
       </div>
       <div class="select-row">
         <label>
-          Generation
+          {{ ui.generation }}
           <select id="generation-select">
             {% for gen in generations %}
               <option value="{{ gen }}" {% if gen == generation %}selected{% endif %}>{{ gen }}</option>
@@ -28,10 +28,18 @@
           </select>
         </label>
         <label>
-          Version Group
+          {{ ui.version_group }}
           <select id="version-group-select">
             {% for vg in version_groups %}
               <option value="{{ vg }}" {% if vg == version_group %}selected{% endif %}>{{ vg }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>
+          {{ ui.language }}
+          <select id="language-select">
+            {% for lang in languages %}
+              <option value="{{ lang }}" {% if lang == language %}selected{% endif %}>{{ lang }}</option>
             {% endfor %}
           </select>
         </label>
@@ -40,16 +48,17 @@
         <form method="get" class="search">
           <input type="hidden" name="generation" id="generation-hidden" value="{{ generation }}" />
           <input type="hidden" name="version_group" id="version-group-hidden" value="{{ version_group }}" />
+          <input type="hidden" name="language" id="language-hidden" value="{{ language }}" />
           <label>
-            Pokemonname
-            <input name="name" placeholder="z.B. Pikachu" value="{{ name }}" list="pokemon-suggestions" autocomplete="off" id="pokemon-input" />
+            {{ ui.pokemon_name }}
+            <input name="name" placeholder="{{ ui.name_placeholder }}" value="{{ name }}" list="pokemon-suggestions" autocomplete="off" id="pokemon-input" />
             <datalist id="pokemon-suggestions"></datalist>
           </label>
           <label>
-            Level (optional)
-            <input name="level" placeholder="leer = bis 100" value="{{ level }}" />
+            {{ ui.level_label }}
+            <input name="level" placeholder="{{ ui.level_placeholder }}" value="{{ level }}" />
           </label>
-          <button type="submit">Suchen</button>
+          <button type="submit">{{ ui.search }}</button>
         </form>
         {% if error %}
           <div class="error">{{ error }}</div>
@@ -64,18 +73,18 @@
           <h2>
             {{ pokemon.display_name }}
             {% if pokemon.pokewiki_url %}
-              <a class="external-link" href="{{ pokemon.pokewiki_url }}" target="_blank" rel="noopener" title="PokéWiki Eintrag">🔗</a>
+              <a class="external-link" href="{{ pokemon.pokewiki_url }}" target="_blank" rel="noopener" title="{{ ui.pokewiki_entry }}">🔗</a>
             {% endif %}
           </h2>
           {% if pokemon.english_name %}
             <p class="pokemon-english"><em>{{ pokemon.english_name }}</em></p>
           {% endif %}
-          <p>Fangrate: <strong style="color: {{ pokemon.capture_rate_color }}">{{ pokemon.capture_rate }}</strong></p>
+          <p>{{ ui.capture_rate }}: <strong style="color: {{ pokemon.capture_rate_color }}">{{ pokemon.capture_rate }}</strong></p>
           {% if pokemon.pokedex_entry %}
             <p>{{ pokemon.pokedex_entry }}</p>
           {% endif %}
           <div class="type-inline">
-            <span>Typen:</span>
+            <span>{{ ui.types }}:</span>
             {% for item in pokemon.types %}
               <span class="type-pill">
                 {% if item.sprite %}
@@ -93,16 +102,16 @@
 
       {% if evolution_chain %}
       <div class="evolution-card">
-        <h2 title="Zeigt die Entwicklungsreihe dieses Pokémons">Entwicklungen</h2>
+        <h2 title="{{ ui.evolutions_tooltip }}">{{ ui.evolutions }}</h2>
         <div class="evolution-row">
           {% for evo in evolution_chain %}
-            <a class="evolution-item" href="/?name={{ evo.query_name }}&level={{ level }}&generation={{ generation }}&version_group={{ version_group }}">
+            <a class="evolution-item" href="/?name={{ evo.query_name }}&level={{ level }}&generation={{ generation }}&version_group={{ version_group }}&language={{ language }}">
               {% if evo.sprite %}
                 <img src="{{ evo.sprite }}" alt="{{ evo.name }}" />
               {% endif %}
               <span>{{ evo.name }}</span>
               {% if not evo.is_base and evo.level is not none %}
-                <small>Level {{ evo.level }}</small>
+                <small>{{ ui.level_short }} {{ evo.level }}</small>
               {% endif %}
             </a>
           {% endfor %}
@@ -112,7 +121,7 @@
 
       <div class="type-panels">
         <div class="panel">
-          <h2 title="Zeigt die Effektivität von Angriffs-Typen (Multiplikatoren)">Typen bei Angriff</h2>
+          <h2 title="{{ ui.attack_types_tooltip }}">{{ ui.attack_types }}</h2>
           <div class="type-grid">
             {% for item in effective_types %}
               <div class="type-chip" style="border-color: {{ item.strength_color }}; box-shadow: inset 0 0 0 1px {{ item.strength_color }};">
@@ -126,7 +135,7 @@
           </div>
         </div>
         <div class="panel">
-          <h2 title="Zeigt Typen, die durch die gewählten Attacken am stärksten gefährdet sind">Stärkste Bedrohungen</h2>
+          <h2 title="{{ ui.danger_tooltip }}">{{ ui.danger_title }}</h2>
           <div class="type-grid">
             {% for item in dangerous_types %}
               <div class="type-chip">
@@ -134,7 +143,7 @@
                   <img src="{{ item.sprite }}" alt="{{ item.type }}" />
                 {% endif %}
                 <span>{{ item.type }}</span>
-                <small>{{ item.count }} Treffer</small>
+                <small>{{ item.count }} {{ ui.hits }}</small>
                 {% if item.moves %}
                   <small class="danger-moves">
                     {% for move in item.moves %}
@@ -150,24 +159,24 @@
     </section>
 
     <section class="moves">
-      <h2 title="Alle Attacken; die zuletzt gelernten Attacken bis zum angegebenen Level werden hervorgehoben">Attacken (nach Level)</h2>
+      <h2 title="{{ ui.moves_tooltip }}">{{ ui.moves_title }}</h2>
       <div class="table-wrap">
         <table class="sortable" id="moves-table">
           <thead>
             <tr>
-              <th data-sort="number">Level</th>
-              <th data-sort="text">Attacke</th>
-              <th data-sort="text">Typ</th>
-              <th data-sort="number">Power</th>
-              <th data-sort="number">Accuracy</th>
-              <th data-sort="number">PP</th>
+              <th data-sort="number">{{ ui.table_level }}</th>
+              <th data-sort="text">{{ ui.table_move }}</th>
+              <th data-sort="text">{{ ui.table_type }}</th>
+              <th data-sort="number">{{ ui.table_power }}</th>
+              <th data-sort="number">{{ ui.table_accuracy }}</th>
+              <th data-sort="number">{{ ui.table_pp }}</th>
             </tr>
           </thead>
           <tbody>
             {% for move in moves %}
               <tr class="{% if move.highlight %}highlighted-move{% endif %}">
                 <td data-sort-value="{{ move.level }}">{{ move.level }}</td>
-                <td data-sort-value="{{ move.name }}" title="{{ move.english_name }}">{{ move.name }} {% if move.pokewiki_url %}<a class="external-link" href="{{ move.pokewiki_url }}" target="_blank" rel="noopener" title="PokéWiki Eintrag">🔗</a>{% endif %}</td>
+                <td data-sort-value="{{ move.name }}" title="{{ move.english_name }}">{{ move.name }} {% if move.pokewiki_url %}<a class="external-link" href="{{ move.pokewiki_url }}" target="_blank" rel="noopener" title="{{ ui.pokewiki_entry }}">🔗</a>{% endif %}</td>
                 <td data-sort-value="{{ move.type }}">
                   {% if move.type_sprite %}
                     <img src="{{ move.type_sprite }}" alt="{{ move.type }}" class="type-icon" />
@@ -196,8 +205,10 @@
   <script>
     const generationSelect = document.getElementById("generation-select");
     const versionGroupSelect = document.getElementById("version-group-select");
+    const languageSelect = document.getElementById("language-select");
     const generationHidden = document.getElementById("generation-hidden");
     const versionGroupHidden = document.getElementById("version-group-hidden");
+    const languageHidden = document.getElementById("language-hidden");
     const pokemonInput = document.getElementById("pokemon-input");
     const suggestionList = document.getElementById("pokemon-suggestions");
 
@@ -207,6 +218,9 @@
       }
       if (versionGroupHidden && versionGroupSelect) {
         versionGroupHidden.value = versionGroupSelect.value || "";
+      }
+      if (languageHidden && languageSelect) {
+        languageHidden.value = languageSelect.value || "";
       }
       syncBrowserUrlWithSelections();
     };
@@ -218,6 +232,7 @@
       const url = new URL(window.location.href);
       const generationValue = generationSelect?.value || "";
       const versionGroupValue = versionGroupSelect?.value || "";
+      const languageValue = languageSelect?.value || "";
 
       if (generationValue) {
         url.searchParams.set("generation", generationValue);
@@ -229,6 +244,12 @@
         url.searchParams.set("version_group", versionGroupValue);
       } else {
         url.searchParams.delete("version_group");
+      }
+
+      if (languageValue) {
+        url.searchParams.set("language", languageValue);
+      } else {
+        url.searchParams.delete("language");
       }
 
       const query = url.searchParams.toString();
@@ -267,6 +288,11 @@
       syncQueryParamsToForm();
     });
 
+    languageSelect?.addEventListener("change", (event) => {
+      syncQueryParamsToForm();
+      suggestionList.innerHTML = "";
+    });
+
     syncQueryParamsToForm();
 
     let debounceId = null;
@@ -281,7 +307,8 @@
           return;
         }
         const genValue = generationSelect?.value || "";
-        const response = await fetch(`/suggest?query=${encodeURIComponent(value)}&generation=${encodeURIComponent(genValue)}`);
+        const langValue = languageSelect?.value || "";
+        const response = await fetch(`/suggest?query=${encodeURIComponent(value)}&generation=${encodeURIComponent(genValue)}&language=${encodeURIComponent(langValue)}`);
         const payload = await response.json();
         suggestionList.innerHTML = "";
         for (const item of payload.results || []) {
