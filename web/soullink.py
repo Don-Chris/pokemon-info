@@ -29,7 +29,7 @@ def _normalize_location_area_key(value: str) -> str:
     return value.strip().lower().replace(" ", "-")
 
 
-def _format_location_area(value: str) -> str:
+def _format_location(value: str) -> str:
     if not value:
         return ""
     if value.lower() == "starter":
@@ -82,10 +82,10 @@ def create_soullink_router(
     soullink_cache: Optional[Dict[str, Dict[str, Any]]] = None
     soullink_cache_maintenance_done = False
     soullink_lock = threading.RLock()
-    location_area_cache: List[Dict[str, str]] = []
-    location_area_name_map: Dict[str, str] = {}
-    location_area_meta_map: Dict[str, Dict[str, Any]] = {}
-    location_area_display_cache: Dict[Tuple[str, str], str] = {}
+    location_cache: List[Dict[str, str]] = []
+    location_name_map: Dict[str, str] = {}
+    location_meta_map: Dict[str, Dict[str, Any]] = {}
+    location_display_cache: Dict[Tuple[str, str], str] = {}
     location_scope_states: Dict[Tuple[str, str], Dict[str, Any]] = {}
 
     scope_locations_per_chunk = max(4, int(os.getenv("SOULLINK_SCOPE_LOCATIONS_PER_CHUNK", "12")))
@@ -99,45 +99,45 @@ def create_soullink_router(
 
     def _get_location_area_display(identifier: str, language: str) -> str:
         key = (identifier, language)
-        if key in location_area_display_cache:
-            return location_area_display_cache[key]
+        if key in location_display_cache:
+            return location_display_cache[key]
 
-        fallback = _format_location_area(identifier)
+        fallback = _format_location(identifier)
         if language == "en":
-            location_area_display_cache[key] = fallback
+            location_display_cache[key] = fallback
             return fallback
 
         try:
-            area_data = base_api._get(f"location-area/{identifier}")
-            raw_name = _pick_localized_name(area_data.get("names", []), fallback, language)
+            location_data = base_api._get(f"location/{identifier}")
+            raw_name = _pick_localized_name(location_data.get("names", []), fallback, language)
             display = raw_name.strip() or fallback
         except HTTPError:
             display = fallback
 
-        location_area_name_map[_normalize_location_area_key(display)] = identifier
-        location_area_display_cache[key] = display
+        location_name_map[_normalize_location_area_key(display)] = identifier
+        location_display_cache[key] = display
         return display
 
     def _register_location_area(identifier: str, scope_key: Optional[Tuple[str, str]] = None) -> None:
         if not identifier:
             return
         normalized_identifier = _normalize_location_area_key(identifier)
-        meta = location_area_meta_map.get(normalized_identifier)
+        meta = location_meta_map.get(normalized_identifier)
         if not meta:
-            display = _format_location_area(identifier)
+            display = _format_location(identifier)
             meta = {
                 "identifier": normalized_identifier,
                 "display": display,
                 "scopes": set(),
             }
-            location_area_meta_map[normalized_identifier] = meta
-            location_area_cache.append({"name": normalized_identifier, "display": display})
+            location_meta_map[normalized_identifier] = meta
+            location_cache.append({"name": normalized_identifier, "display": display})
 
         if scope_key:
             meta["scopes"].add(scope_key)
 
-        location_area_name_map[_normalize_location_area_key(meta["display"])] = normalized_identifier
-        location_area_name_map[normalized_identifier] = normalized_identifier
+        location_name_map[_normalize_location_area_key(meta["display"])] = normalized_identifier
+        location_name_map[normalized_identifier] = normalized_identifier
 
     def _get_scope_key(generation: str, version_group: str) -> Tuple[str, str]:
         return (generation.strip().lower(), version_group.strip().lower())
@@ -226,17 +226,8 @@ def create_soullink_router(
             cursor += 1
             processed += 1
 
-            try:
-                location_detail = base_api._get(f"location/{location_name}")
-            except HTTPError:
-                continue
-
-            for area_ref in location_detail.get("areas", []):
-                area_name = str(area_ref.get("name") or "").strip()
-                if not area_name:
-                    continue
-                _register_location_area(area_name, scope_key=scope_key)
-                loaded_any = True
+            _register_location_area(location_name, scope_key=scope_key)
+            loaded_any = True
 
         state["cursor"] = cursor
         if cursor >= len(locations):
@@ -260,7 +251,7 @@ def create_soullink_router(
             scope_key = _get_scope_key(generation, version_group)
             _initialize_scope(scope_key)
 
-        if not location_area_cache and scope_key:
+        if not location_cache and scope_key:
             _load_scope_chunk(scope_key, max_locations=scope_locations_per_chunk)
 
         candidate_matches: List[Tuple[int, str]] = []
@@ -281,11 +272,11 @@ def create_soullink_router(
             return None
 
         def collect_matches() -> None:
-            for item in location_area_cache:
+            for item in location_cache:
                 identifier = item["name"]
                 if identifier in seen:
                     continue
-                meta = location_area_meta_map.get(identifier, {})
+                meta = location_meta_map.get(identifier, {})
                 if scope_key is not None:
                     scopes = meta.get("scopes") or set()
                     if scope_key not in scopes:
@@ -320,7 +311,7 @@ def create_soullink_router(
         results: List[str] = []
         for _, identifier in candidate_matches[:limit]:
             display = _get_location_area_display(identifier, language)
-            location_area_name_map[_normalize_location_area_key(display)] = identifier
+            location_name_map[_normalize_location_area_key(display)] = identifier
             results.append(display)
         return results
 
@@ -330,7 +321,7 @@ def create_soullink_router(
         if not value:
             return "", ""
         key = _normalize_location_area_key(value)
-        identifier = location_area_name_map.get(key)
+        identifier = location_name_map.get(key)
         if not identifier:
             identifier = _normalize_location_area_key(value)
         return identifier, _get_location_area_display(identifier, language)
@@ -679,7 +670,7 @@ def create_soullink_router(
             row_errors: List[str] = []
 
             if location_id and location_id in used_locations:
-                row_errors.append(f"Location Area bereits belegt: {used_locations[location_id]}.")
+                row_errors.append(f"Location bereits belegt: {used_locations[location_id]}.")
             if location_id:
                 used_locations[location_id] = location_display
 
