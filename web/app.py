@@ -220,7 +220,8 @@ def suggest(query: str = "", generation: Optional[str] = None) -> JSONResponse:
     generation_value = generation or APP_GENERATION
     if not query:
         return JSONResponse({"results": []})
-    _ensure_name_cache(generation_value)
+    # Ensure localized cache so first suggestions are German, not identifiers.
+    _ensure_localized_name_cache(generation_value)
     query_lc = query.strip().lower()
     results: List[str] = []
     names = _name_cache_de_by_generation.get(generation_value, [])
