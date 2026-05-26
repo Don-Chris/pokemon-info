@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="{{ info_language }}">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pokemon Portal</title>
+  <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/25.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/soullink.css" />
+</head>
+<body>
+  <div class="page">
+    <header class="hero">
+      <div class="hero-text">
+        <h1>Pokemon Portal</h1>
+        <p class="lead">Eine gemeinsame Startseite fuer Pokemon Info und Soullink Sessions.</p>
+      </div>
+    </header>
+
+    <section class="home-grid">
+      <div class="hero-card">
+        <h2 class="card-title">Pokemon Info</h2>
+        <form method="get" action="/info" class="form-grid">
+          <label>
+            Generation
+            <select id="info-generation" name="generation">
+              {% for gen in generations %}
+                <option value="{{ gen }}" {% if gen == info_generation %}selected{% endif %}>{{ gen }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            Version Group
+            <select id="info-version" name="version_group">
+              {% for vg in info_version_groups %}
+                <option value="{{ vg }}" {% if vg == info_version_group %}selected{% endif %}>{{ vg }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            Sprache
+            <select id="info-language" name="language">
+              {% for lang in languages %}
+                <option value="{{ lang }}" {% if lang == info_language %}selected{% endif %}>{{ lang }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            Pokemonname
+            <input name="name" placeholder="z.B. Pikachu" list="pokemon-suggestions" autocomplete="off" />
+          </label>
+          <label>
+            Level (optional)
+            <input name="level" placeholder="leer = bis 100" />
+          </label>
+          <button type="submit">Suchen</button>
+        </form>
+      </div>
+
+      <div class="hero-card">
+        <h2 class="card-title">Soullink erstellen</h2>
+        <form method="post" action="/soullink/create" class="form-grid">
+          <label>
+            Generation
+            <select id="link-generation" name="generation">
+              {% for gen in generations %}
+                <option value="{{ gen }}" {% if gen == link_generation %}selected{% endif %}>{{ gen }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            Version Group
+            <select id="link-version" name="version_group">
+              {% for vg in link_version_groups %}
+                <option value="{{ vg }}" {% if vg == link_version_group %}selected{% endif %}>{{ vg }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            Spieler
+            <select name="players">
+              {% for count in [2,3,4] %}
+                <option value="{{ count }}" {% if count == link_players %}selected{% endif %}>{{ count }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <button type="submit">Soullink erstellen</button>
+        </form>
+      </div>
+    </section>
+  </div>
+
+  <datalist id="pokemon-suggestions"></datalist>
+
+  <script>
+    const infoGeneration = document.getElementById("info-generation");
+    const infoVersion = document.getElementById("info-version");
+    const infoLanguage = document.getElementById("info-language");
+    const pokemonInput = document.querySelector("input[name='name']");
+    const suggestionList = document.getElementById("pokemon-suggestions");
+
+    const linkGeneration = document.getElementById("link-generation");
+    const linkVersion = document.getElementById("link-version");
+
+    const updateVersionGroups = async (generation, selectEl) => {
+      const response = await fetch(`/version-groups?generation=${encodeURIComponent(generation)}`);
+      const payload = await response.json();
+      const currentValue = selectEl.value;
+      selectEl.innerHTML = "";
+      for (const item of payload.results || []) {
+        const option = document.createElement("option");
+        option.value = item;
+        option.textContent = item;
+        if (item === currentValue) {
+          option.selected = true;
+        }
+        selectEl.appendChild(option);
+      }
+      if (!selectEl.value && selectEl.options.length) {
+        selectEl.selectedIndex = 0;
+      }
+    };
+
+    infoGeneration?.addEventListener("change", (event) => {
+      updateVersionGroups(event.target.value, infoVersion);
+      suggestionList.innerHTML = "";
+    });
+
+    infoLanguage?.addEventListener("change", () => {
+      suggestionList.innerHTML = "";
+    });
+
+    linkGeneration?.addEventListener("change", (event) => {
+      updateVersionGroups(event.target.value, linkVersion);
+    });
+
+    let debounceId = null;
+    pokemonInput?.addEventListener("input", (event) => {
+      const value = event.target.value.trim();
+      if (debounceId) {
+        clearTimeout(debounceId);
+      }
+      debounceId = setTimeout(async () => {
+        if (!value) {
+          suggestionList.innerHTML = "";
+          return;
+        }
+        const genValue = infoGeneration?.value || "";
+        const langValue = infoLanguage?.value || "";
+        const response = await fetch(`/suggest?query=${encodeURIComponent(value)}&generation=${encodeURIComponent(genValue)}&language=${encodeURIComponent(langValue)}`);
+        const payload = await response.json();
+        suggestionList.innerHTML = "";
+        for (const item of payload.results || []) {
+          const option = document.createElement("option");
+          option.value = item;
+          suggestionList.appendChild(option);
+        }
+      }, 150);
+    });
+  </script>
+</body>
+</html>

@@ -5,7 +5,7 @@ services:
       dockerfile: Dockerfile
     container_name: pokeapi-web
     ports:
-      - "${POKEAPI_WEB_PORT:-8001}:8000"
+      - "${POKEAPI_WEB_PORT:-8000}:8000"
     environment:
       POKEAPI_GENERATION: ${POKEAPI_GENERATION:-generation-i}
       POKEAPI_VERSION_GROUP: ${POKEAPI_VERSION_GROUP:-red-blue}

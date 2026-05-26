@@ -6,7 +6,7 @@ import sys
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import FastAPI, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from requests import HTTPError
@@ -14,6 +14,8 @@ from requests import HTTPError
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from pokemon_api import PokeAPI
+from .info import create_info_router
+from .soullink import _sanitize_players, create_soullink_router
 from urllib.parse import quote
 
 APP_GENERATION = os.getenv("POKEAPI_GENERATION", "generation-i")
@@ -21,6 +23,10 @@ APP_VERSION_GROUP = os.getenv("POKEAPI_VERSION_GROUP", "red-blue")
 APP_LANGUAGE = os.getenv("POKEAPI_LANGUAGE", "de")
 APP_LOG_LEVEL = os.getenv("APP_LOG_LEVEL", "INFO").upper()
 APP_ENABLE_GLOBAL_NAME_FALLBACK = os.getenv("POKEAPI_ENABLE_GLOBAL_NAME_FALLBACK", "false").lower() == "true"
+APP_POKEAPI_CACHE_PATH = os.getenv("POKEAPI_CACHE_PATH", "/cache/pokeapi_cache.json")
+APP_SOULLINK_POKEAPI_CACHE_PATH = os.getenv("SOULLINK_POKEAPI_CACHE_PATH", "/cache/pokeapi_soullink_cache.json")
+SOULLINK_STORE_PATH = os.getenv("SOULLINK_STORE_PATH", "/cache/soullinks.json")
+SOULLINK_CODE_LENGTH = max(6, min(10, int(os.getenv("SOULLINK_CODE_LENGTH", "8"))))
 
 logging.basicConfig(
     level=getattr(logging, APP_LOG_LEVEL, logging.INFO),
@@ -34,6 +40,7 @@ templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "t
 templates.env.cache = None
 
 _api_cache: Dict[Tuple[str, str, str], PokeAPI] = {}
+_soullink_api_cache: Dict[Tuple[str, str, str], PokeAPI] = {}
 _name_cache_by_generation: Dict[str, List[str]] = {}
 _name_cache_lc_by_generation: Dict[str, List[str]] = {}
 _name_cache_de_by_generation: Dict[str, List[str]] = {}
@@ -44,7 +51,7 @@ _name_to_identifier_by_generation: Dict[str, Dict[str, str]] = {}
 _localized_name_cache_ready_by_generation: Dict[str, bool] = {}
 _name_to_identifier_global: Optional[Dict[str, str]] = None
 _species_identifiers_by_generation: Dict[str, List[str]] = {}
-_all_species_index_cache: Optional[List[Tuple[int, str]]] = None
+_species_identifiers_single_generation: Dict[str, List[str]] = {}
 
 _GENERATION_NATDEX_CUTOFF: Dict[str, int] = {
     "generation-i": 151,
@@ -58,7 +65,30 @@ _GENERATION_NATDEX_CUTOFF: Dict[str, int] = {
     "generation-ix": 1025,
 }
 
-base_api = PokeAPI(generation=APP_GENERATION, version_group=APP_VERSION_GROUP, language=APP_LANGUAGE)
+_GENERATION_SEQUENCE: List[str] = [
+    "generation-i",
+    "generation-ii",
+    "generation-iii",
+    "generation-iv",
+    "generation-v",
+    "generation-vi",
+    "generation-vii",
+    "generation-viii",
+    "generation-ix",
+]
+
+base_api = PokeAPI(
+    generation=APP_GENERATION,
+    version_group=APP_VERSION_GROUP,
+    language=APP_LANGUAGE,
+    cache_path=APP_POKEAPI_CACHE_PATH,
+)
+base_api_soullink = PokeAPI(
+    generation=APP_GENERATION,
+    version_group=APP_VERSION_GROUP,
+    language=APP_LANGUAGE,
+    cache_path=APP_SOULLINK_POKEAPI_CACHE_PATH,
+)
 _SUPPORTED_LANGUAGES = ["de", "en"]
 
 _UI_TEXT: Dict[str, Dict[str, str]] = {
@@ -133,155 +163,27 @@ logger.info(
 )
 
 
-def _parse_level(level_raw: Optional[str]) -> Optional[int]:
-    if not level_raw:
-        return None
-    try:
-        value = int(level_raw)
-    except ValueError:
-        return None
-    return value if value > 0 else None
-
-
 @app.get("/", response_class=HTMLResponse)
-def index(
+def root(
     request: Request,
-    name: Optional[str] = Query(default=None),
-    level: Optional[str] = Query(default=None),
-    generation: Optional[str] = Query(default=None),
-    version_group: Optional[str] = Query(default=None),
-    language: Optional[str] = Query(default=None),
-) -> HTMLResponse:
-    selected_generation = generation or APP_GENERATION
-    selected_version_group = version_group or APP_VERSION_GROUP
-    selected_language = (language or APP_LANGUAGE).lower()
-    if selected_language not in _SUPPORTED_LANGUAGES:
-        selected_language = APP_LANGUAGE
-
-    logger.debug(
-        "GET / mit name=%s level=%s generation=%s version_group=%s",
-        name,
-        level,
-        selected_generation,
-        selected_version_group,
+    generation_info: Optional[str] = Query(default=None),
+    version_group_info: Optional[str] = Query(default=None),
+    language_info: Optional[str] = Query(default=None),
+    generation_link: Optional[str] = Query(default=None),
+    version_group_link: Optional[str] = Query(default=None),
+    players: Optional[int] = Query(default=None),
+) -> Response:
+    return _render_home(
+        request,
+        generation_info=generation_info,
+        version_group_info=version_group_info,
+        language_info=language_info,
+        generation_link=generation_link,
+        version_group_link=version_group_link,
+        players=players,
     )
-    api = _get_api(selected_generation, selected_version_group, selected_language)
-    generations = base_api.list_generations()
-    version_groups = _get_version_groups_for_generation(selected_generation)
-    data: Dict[str, Any] = {
-        "name": name or "",
-        "level": level or "",
-        "generation": selected_generation,
-        "version_group": selected_version_group,
-        "generations": generations,
-        "version_groups": version_groups,
-        "error": None,
-        "pokemon": None,
-        "moves": [],
-        "effective_types": [],
-        "dangerous_types": [],
-        "evolution_chain": [],
-        "language": selected_language,
-        "languages": _SUPPORTED_LANGUAGES,
-        "ui": _UI_TEXT.get(selected_language, _UI_TEXT["de"]),
-    }
 
-    if not name:
-        return _render_template(request, data)
 
-    level_value = _parse_level(level)
-
-    try:
-        resolved_name = _resolve_identifier(name, selected_generation, selected_language, api=api)
-        pokemon_name = _get_display_name(api, resolved_name)
-        capture_rate = _get_capture_rate(api, resolved_name)
-        own_types = _get_pokemon_type_entries(api, resolved_name)
-        sprite = api.get_pokemon_sprite(resolved_name, key="official_artwork") or api.get_pokemon_sprite(resolved_name)
-        pokedex_entry = _get_pokedex_entry(api, resolved_name, selected_version_group, selected_language)
-        english_name = _get_english_pokemon_name(api, resolved_name)
-
-        # Fetch all moves (no level cap) and mark the last 4 moves the Pokémon can learn up to the given level
-        all_moves = api.get_pokemon_moves(resolved_name, level=None, version_group=selected_version_group, limit=1000)
-        effective = api.list_attacking_type_multipliers(resolved_name, up_to_generation=selected_generation)
-
-        # Determine the subset of moves to use for 'Besonders gefaehrdet' and highlighting
-        if level_value is not None:
-            # moves with a defined level <= level_value
-            eligible = [m for m in all_moves if isinstance(m.get("level"), int) and m.get("level") <= level_value]
-            # sort by level desc, then name
-            eligible_sorted = sorted(eligible, key=lambda m: (int(m.get("level", 0)), m.get("identifier", "")), reverse=True)
-            selected_dangerous_moves = eligible_sorted[:4]
-        else:
-            selected_dangerous_moves = all_moves
-
-        dangerous = api.list_dangerous_types_from_moves(selected_dangerous_moves, up_to_generation=selected_generation)
-
-        # Highlight keys: (level, identifier) for selected moves
-        highlighted_keys: set[Tuple[int, str]] = set()
-        if level_value is not None:
-            for move in selected_dangerous_moves:
-                try:
-                    move_level = int(move.get("level", 0))
-                except (TypeError, ValueError):
-                    move_level = 0
-                move_identifier = str(move.get("identifier") or "")
-                highlighted_keys.add((move_level, move_identifier))
-
-        moves = _attach_move_type_sprites(api, all_moves)
-        for move in moves:
-            try:
-                move_level = int(move.get("level", 0))
-            except (TypeError, ValueError):
-                move_level = 0
-            move_identifier = str(move.get("identifier") or "")
-            move["highlight"] = (move_level, move_identifier) in highlighted_keys
-            # attach pokewiki url for move using english name if available
-            english = move.get("english_name") or move.get("name")
-            move["pokewiki_url"] = _build_pokewiki_move_url(english)
-
-        effective_types = _attach_type_sprites(api, effective)
-        for item in effective_types:
-            item["strength_color"] = _multiplier_color(item.get("multiplier", 1.0))
-        dangerous_types = _attach_type_sprites(api, [item for item in dangerous if item["count"] > 0])
-        evolution_chain = _get_evolution_chain(api, resolved_name)
-
-        data.update(
-            {
-                "pokemon": {
-                    "display_name": pokemon_name,
-                    "capture_rate": capture_rate,
-                    "capture_rate_color": _capture_rate_color(capture_rate),
-                    "sprite": sprite,
-                    "types": own_types,
-                    "pokedex_entry": pokedex_entry,
-                    "english_name": english_name,
-                    "pokewiki_url": _build_pokewiki_url(api, resolved_name),
-                },
-                "moves": moves,
-                "effective_types": effective_types,
-                "dangerous_types": dangerous_types,
-                "evolution_chain": evolution_chain,
-            }
-        )
-    except HTTPError as exc:
-        logger.warning(
-            "HTTPError bei Suche nach '%s' (generation=%s, version_group=%s): %s",
-            name,
-            selected_generation,
-            selected_version_group,
-            exc,
-        )
-        data["error"] = f"API error: {exc.response.status_code}"
-    except Exception as exc:
-        logger.exception(
-            "Unerwarteter Fehler bei Suche nach '%s' (generation=%s, version_group=%s)",
-            name,
-            selected_generation,
-            selected_version_group,
-        )
-        data["error"] = f"Error: {exc}"
-
-    return _render_template(request, data)
 
 
 @app.get("/version-groups", response_class=JSONResponse)
@@ -318,6 +220,27 @@ def suggest(query: str = "", generation: Optional[str] = None, language: Optiona
     return JSONResponse({"results": results})
 
 
+@app.get("/soullink", response_class=HTMLResponse)
+def soullink_start(
+    request: Request,
+    generation: Optional[str] = Query(default=None),
+    version_group: Optional[str] = Query(default=None),
+    language: Optional[str] = Query(default=None),
+    players: Optional[int] = Query(default=None),
+) -> Response:
+    return _render_home(
+        request,
+        generation_info=generation,
+        version_group_info=version_group,
+        language_info=language,
+        generation_link=generation,
+        version_group_link=version_group,
+        players=players,
+    )
+
+
+
+
 def _attach_type_sprites(api: PokeAPI, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     enriched: List[Dict[str, Any]] = []
     for item in items:
@@ -350,19 +273,63 @@ def _attach_move_type_sprites(api: PokeAPI, items: List[Dict[str, Any]]) -> List
     return enriched
 
 
-def _render_template(request: Request, data: Dict[str, Any]) -> HTMLResponse:
-    context = {"request": request, **data}
-    try:
-        return templates.TemplateResponse(request, "index.html", context)
-    except TypeError:
-        return templates.TemplateResponse("index.html", context)
+def _render_home(
+    request: Request,
+    generation_info: Optional[str],
+    version_group_info: Optional[str],
+    language_info: Optional[str],
+    generation_link: Optional[str],
+    version_group_link: Optional[str],
+    players: Optional[int],
+) -> Response:
+    info_generation = generation_info or APP_GENERATION
+    info_version_group = version_group_info or APP_VERSION_GROUP
+    info_language = (language_info or APP_LANGUAGE).lower()
+    if info_language not in _SUPPORTED_LANGUAGES:
+        info_language = APP_LANGUAGE
+
+    link_generation = generation_link or APP_GENERATION
+    link_version_group = version_group_link or APP_VERSION_GROUP
+    link_players = _sanitize_players(players or 2)
+
+    context = {
+        "request": request,
+        "generations": base_api.list_generations(),
+        "languages": _SUPPORTED_LANGUAGES,
+        "info_generation": info_generation,
+        "info_version_group": info_version_group,
+        "info_language": info_language,
+        "info_version_groups": _get_version_groups_for_generation(info_generation),
+        "link_generation": link_generation,
+        "link_version_group": link_version_group,
+        "link_players": link_players,
+        "link_version_groups": _get_version_groups_for_generation(link_generation),
+    }
+    return templates.TemplateResponse(request, "home.html", context)  # type: ignore[call-arg]
 
 
 def _get_api(generation: str, version_group: str, language: str) -> PokeAPI:
     key = (generation, version_group, language)
     if key not in _api_cache:
-        _api_cache[key] = PokeAPI(generation=generation, version_group=version_group, language=language)
+        _api_cache[key] = PokeAPI(
+            generation=generation,
+            version_group=version_group,
+            language=language,
+            cache_path=APP_POKEAPI_CACHE_PATH,
+        )
     return _api_cache[key]
+
+
+def _get_soullink_api(generation: str, version_group: str, language: str) -> PokeAPI:
+    key = (generation, version_group, language)
+    if key not in _soullink_api_cache:
+        _soullink_api_cache[key] = PokeAPI(
+            generation=generation,
+            version_group=version_group,
+            language=language,
+            cache_path=APP_SOULLINK_POKEAPI_CACHE_PATH,
+        )
+    return _soullink_api_cache[key]
 
 
 def _ensure_name_cache(generation: str) -> None:
@@ -405,34 +372,21 @@ def _ensure_name_cache(generation: str) -> None:
     _name_to_identifier_by_generation[generation] = name_map
 
 
-def _extract_resource_id(url: str) -> Optional[int]:
-    if not url:
-        return None
-    stripped = url.rstrip("/")
-    tail = stripped.split("/")[-1]
+def _get_species_identifiers_for_generation(generation: str) -> List[str]:
+    generation_key = generation.lower().strip()
+    if generation_key in _species_identifiers_single_generation:
+        return _species_identifiers_single_generation[generation_key]
+
     try:
-        return int(tail)
-    except ValueError:
-        return None
+        data = base_api._get(f"generation/{generation_key}")
+    except HTTPError:
+        _species_identifiers_single_generation[generation_key] = []
+        return []
 
-
-def _load_all_species_index() -> List[Tuple[int, str]]:
-    global _all_species_index_cache
-    if _all_species_index_cache is not None:
-        return _all_species_index_cache
-
-    data = base_api._get("pokemon-species?limit=20000")
-    rows: List[Tuple[int, str]] = []
-    for item in data.get("results", []):
-        name = item.get("name")
-        species_id = _extract_resource_id(item.get("url", ""))
-        if not name or species_id is None:
-            continue
-        rows.append((species_id, name))
-
-    rows.sort(key=lambda pair: pair[0])
-    _all_species_index_cache = rows
-    return rows
+    names = [str(item.get("name") or "").strip() for item in data.get("pokemon_species", [])]
+    names = [name for name in names if name]
+    _species_identifiers_single_generation[generation_key] = names
+    return names
 
 
 def _get_species_identifiers_up_to_generation(generation: str) -> List[str]:
@@ -440,12 +394,21 @@ def _get_species_identifiers_up_to_generation(generation: str) -> List[str]:
     if generation_key in _species_identifiers_by_generation:
         return _species_identifiers_by_generation[generation_key]
 
-    all_rows = _load_all_species_index()
-    cutoff = _GENERATION_NATDEX_CUTOFF.get(generation_key)
-    if cutoff is None:
-        names = [name for _, name in all_rows]
+    target_order = _GENERATION_NATDEX_CUTOFF.get(generation_key)
+    if target_order is None:
+        names = _get_species_identifiers_for_generation(generation_key)
     else:
-        names = [name for species_id, name in all_rows if species_id <= cutoff]
+        names = []
+        seen: set[str] = set()
+        for gen_key in _GENERATION_SEQUENCE:
+            gen_order = _GENERATION_NATDEX_CUTOFF.get(gen_key, 999)
+            if gen_order > target_order:
+                break
+            for identifier in _get_species_identifiers_for_generation(gen_key):
+                if identifier in seen:
+                    continue
+                seen.add(identifier)
+                names.append(identifier)
 
     _species_identifiers_by_generation[generation_key] = names
     return names
@@ -633,13 +596,6 @@ def _get_version_groups_for_generation(generation: str) -> List[str]:
     return [item["name"] for item in groups]
 
 
-def _capture_rate_color(rate: Optional[int]) -> str:
-    if rate is None:
-        return "#94a3b8"
-    ratio = max(0, min(rate, 255)) / 255.0
-    red = int(255 * (1 - ratio))
-    green = int(255 * ratio)
-    return f"rgb({red}, {green}, 80)"
 
 
 def _multiplier_color(multiplier: float) -> str:
@@ -757,3 +713,48 @@ def _flatten_chain_entries(node: Dict[str, Any], is_base: bool, level: Optional[
         next_level = details[0].get("min_level") if details else None
         entries.extend(_flatten_chain_entries(child, is_base=False, level=next_level))
     return [entry for entry in entries if entry.get("name")]
+
+
+info_router = create_info_router(
+    base_api=base_api,
+    get_api=_get_api,
+    resolve_identifier=_resolve_identifier,
+    get_display_name=_get_display_name,
+    get_capture_rate=_get_capture_rate,
+    get_pokemon_type_entries=_get_pokemon_type_entries,
+    get_pokedex_entry=_get_pokedex_entry,
+    get_english_pokemon_name=_get_english_pokemon_name,
+    attach_move_type_sprites=_attach_move_type_sprites,
+    attach_type_sprites=_attach_type_sprites,
+    get_evolution_chain=_get_evolution_chain,
+    build_pokewiki_url=_build_pokewiki_url,
+    build_pokewiki_move_url=_build_pokewiki_move_url,
+    multiplier_color=_multiplier_color,
+    get_version_groups_for_generation=_get_version_groups_for_generation,
+    supported_languages=_SUPPORTED_LANGUAGES,
+    templates=templates,
+    ui_text=_UI_TEXT,
+    defaults={
+        "generation": APP_GENERATION,
+        "version_group": APP_VERSION_GROUP,
+        "language": APP_LANGUAGE,
+    },
+)
+app.include_router(info_router)
+
+soullink_router = create_soullink_router(
+    base_api=base_api_soullink,
+    get_api=_get_soullink_api,
+    resolve_identifier=_resolve_identifier,
+    get_version_groups_for_generation=_get_version_groups_for_generation,
+    supported_languages=_SUPPORTED_LANGUAGES,
+    templates=templates,
+    defaults={
+        "generation": APP_GENERATION,
+        "version_group": APP_VERSION_GROUP,
+        "language": APP_LANGUAGE,
+    },
+    store_path=SOULLINK_STORE_PATH,
+    code_length=SOULLINK_CODE_LENGTH,
+)
+app.include_router(soullink_router)

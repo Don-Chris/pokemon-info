@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="{{ data.language }}">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Soullink {{ session_name }}</title>
+  <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/175.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/soullink.css" />
+</head>
+<body>
+  <div class="page">
+    <header class="board-hero">
+      <div>
+        <p class="kicker">Soullink Board</p>
+        <h1 id="session-title" data-default-title="Session {{ code }}" title="Doppelklick zum Umbenennen">{{ session_name }}</h1>
+        <p class="lead">Generation: {{ data.generation }} | Version Group: {{ data.version_group }}</p>
+      </div>
+      <div class="hero-actions">
+        <div class="link-box">
+          <span>Share Link</span>
+          <input id="share-link" value="/soullink/{{ code }}" readonly />
+          <button id="copy-link" type="button">Kopieren</button>
+        </div>
+        <a class="link-chip" href="/soullink">Neue Session</a>
+        <a class="link-chip" href="/info">Pokémon Info</a>
+      </div>
+    </header>
+
+    <section class="board">
+      <div class="board-toolbar">
+        <div class="meta">
+          <label>
+            Generation (gesperrt)
+            <select id="generation-select" disabled class="locked-control" title="Wird beim Erstellen festgelegt und kann nicht mehr geändert werden.">
+              {% for gen in generations %}
+                <option value="{{ gen }}" {% if gen == data.generation %}selected{% endif %}>{{ gen }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            Version Group (gesperrt)
+            <select id="version-group-select" disabled class="locked-control" title="Wird beim Erstellen festgelegt und kann nicht mehr geändert werden.">
+              {% for vg in version_groups %}
+                <option value="{{ vg }}" {% if vg == data.version_group %}selected{% endif %}>{{ vg }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            Sprache
+            <select id="language-select">
+              {% for lang in languages %}
+                <option value="{{ lang }}" {% if lang == data.language %}selected{% endif %}>{{ lang }}</option>
+              {% endfor %}
+            </select>
+          </label>
+        </div>
+        <button id="add-row" type="button">Neue Location</button>
+      </div>
+      <p class="locked-note">Generation und Version Group sind fixiert. Sprache kann weiterhin geändert werden.</p>
+
+      <div class="table-wrap">
+        <table class="soul-table">
+          <thead>
+            <tr>
+              <th>Location Area</th>
+              <th>Status</th>
+              {% for idx in range(data.players) %}
+                <th>
+                  <input class="player-name" data-player-index="{{ idx }}" value="{{ data.player_names[idx] }}" />
+                </th>
+              {% endfor %}
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="soul-body">
+            {% for row in data.rows %}
+            <tr class="soul-row {{ row.status_class }}" data-row-id="{{ row.id }}" data-starter="{{ 'true' if row.is_starter else 'false' }}">
+              <td>
+                <input class="location-input" value="{{ row.location.display }}" {% if row.is_starter %}readonly{% endif %} list="location-suggestions" />
+                <div class="row-errors"></div>
+              </td>
+              <td>
+                <select class="status-select">
+                  {% for option in status_options %}
+                    <option value="{{ option }}" {% if option == row.status %}selected{% endif %}>{{ option }}</option>
+                  {% endfor %}
+                </select>
+              </td>
+              {% for player in row.players %}
+                <td>
+                  <div class="pokemon-cell">
+                    <img class="pokemon-sprite{% if not player.sprite %} is-empty{% endif %}" {% if player.sprite %}src="{{ player.sprite }}"{% endif %} alt="" loading="lazy" onerror="this.removeAttribute('src');this.classList.add('is-empty');" />
+                    <input class="pokemon-input" value="{{ player.name }}" list="pokemon-suggestions" />
+                  </div>
+                </td>
+              {% endfor %}
+              <td>
+                {% if not row.is_starter %}
+                  <button type="button" class="delete-row">Löschen</button>
+                {% else %}
+                  <span class="locked">Starter</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <datalist id="location-suggestions"></datalist>
+      <datalist id="pokemon-suggestions"></datalist>
+      <div class="save-hint" id="save-hint">Alle Änderungen werden automatisch gespeichert.</div>
+    </section>
+  </div>
+
+  <script>
+    window.__SOULLINK_DATA__ = {{ data_json | safe }};
+    window.__SOULLINK_STATUS__ = {{ status_options_json | safe }};
+    window.__SOULLINK_CODE__ = "{{ code }}";
+  </script>
+  <script src="/static/soullink.js"></script>
+</body>
+</html>

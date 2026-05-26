@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="{{ language }}">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Soullink Setup</title>
+  <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/133.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/soullink.css" />
+</head>
+<body>
+  <div class="page">
+    <header class="hero">
+      <div class="hero-text">
+        <p class="kicker">Soullink Builder</p>
+        <h1>Neue Soullink Session</h1>
+        <p class="lead">Waehle Generation, Version Group, Sprache und Spieleranzahl. Danach bekommst du einen teilbaren Link.</p>
+        <div class="hero-links">
+          <a class="link-chip" href="/info">Pokemon Info</a>
+        </div>
+      </div>
+      <div class="hero-card">
+        <form method="post" action="/soullink/create" class="form-grid">
+          <label>
+            Generation
+            <select id="generation-select" name="generation">
+              {% for gen in generations %}
+                <option value="{{ gen }}" {% if gen == generation %}selected{% endif %}>{{ gen }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            Version Group
+            <select id="version-group-select" name="version_group">
+              {% for vg in version_groups %}
+                <option value="{{ vg }}" {% if vg == version_group %}selected{% endif %}>{{ vg }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            Sprache
+            <select id="language-select" name="language">
+              {% for lang in languages %}
+                <option value="{{ lang }}" {% if lang == language %}selected{% endif %}>{{ lang }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            Spieler
+            <select name="players">
+              {% for count in [2,3,4] %}
+                <option value="{{ count }}" {% if count == players %}selected{% endif %}>{{ count }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <button type="submit">Soullink erstellen</button>
+        </form>
+      </div>
+    </header>
+  </div>
+  <script>
+    const generationSelect = document.getElementById("generation-select");
+    const versionGroupSelect = document.getElementById("version-group-select");
+
+    const updateVersionGroups = async (generation) => {
+      const response = await fetch(`/version-groups?generation=${encodeURIComponent(generation)}`);
+      const payload = await response.json();
+      const currentValue = versionGroupSelect.value;
+      versionGroupSelect.innerHTML = "";
+      for (const item of payload.results || []) {
+        const option = document.createElement("option");
+        option.value = item;
+        option.textContent = item;
+        if (item === currentValue) {
+          option.selected = true;
+        }
+        versionGroupSelect.appendChild(option);
+      }
+      if (!versionGroupSelect.value && versionGroupSelect.options.length) {
+        versionGroupSelect.selectedIndex = 0;
+      }
+    };
+
+    generationSelect?.addEventListener("change", async (event) => {
+      await updateVersionGroups(event.target.value);
+    });
+  </script>
+</body>
+</html>

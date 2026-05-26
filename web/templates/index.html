@@ -45,7 +45,7 @@
         </label>
       </div>
       <div class="hero-card">
-        <form method="get" class="search">
+        <form method="get" action="/info" class="search">
           <input type="hidden" name="generation" id="generation-hidden" value="{{ generation }}" />
           <input type="hidden" name="version_group" id="version-group-hidden" value="{{ version_group }}" />
           <input type="hidden" name="language" id="language-hidden" value="{{ language }}" />
@@ -105,7 +105,7 @@
         <h2 title="{{ ui.evolutions_tooltip }}">{{ ui.evolutions }}</h2>
         <div class="evolution-row">
           {% for evo in evolution_chain %}
-            <a class="evolution-item" href="/?name={{ evo.query_name }}&level={{ level }}&generation={{ generation }}&version_group={{ version_group }}&language={{ language }}">
+            <a class="evolution-item" href="/info?name={{ evo.query_name }}&level={{ level }}&generation={{ generation }}&version_group={{ version_group }}&language={{ language }}">
               {% if evo.sprite %}
                 <img src="{{ evo.sprite }}" alt="{{ evo.name }}" />
               {% endif %}

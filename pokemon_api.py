@@ -15,6 +15,9 @@ import requests
 
 logger = logging.getLogger("pokeapi.client")
 
+# Shared process-wide lock so multiple PokeAPI instances do not race on one cache file.
+_DISK_CACHE_IO_LOCK = threading.Lock()
+
 GENERATION_ORDER: Dict[str, int] = {
     "generation-i": 1,
     "generation-ii": 2,
@@ -480,38 +483,44 @@ class PokeAPI:
         if cache_dir:
             os.makedirs(cache_dir, exist_ok=True)
 
-        # Remove leftover temporary cache files from previous atomic writes
-        try:
-            for name in os.listdir(cache_dir or "."):
-                if name.startswith("pokeapi-cache-") and name.endswith(".json"):
+        with _DISK_CACHE_IO_LOCK:
+            # Remove only stale temporary files from interrupted atomic writes.
+            now = time.time()
+            try:
+                for name in os.listdir(cache_dir or "."):
+                    if not (name.startswith("pokeapi-cache-") and name.endswith(".json")):
+                        continue
+                    temp_file = os.path.join(cache_dir, name)
                     try:
-                        os.remove(os.path.join(cache_dir, name))
+                        age_seconds = now - os.path.getmtime(temp_file)
+                        if age_seconds > 60:
+                            os.remove(temp_file)
                     except OSError:
                         pass
-        except OSError:
-            pass
+            except OSError:
+                pass
 
-        if not os.path.exists(self._cache_path):
-            return
+            if not os.path.exists(self._cache_path):
+                return
 
-        try:
-            with open(self._cache_path, "r", encoding="utf-8") as handle:
-                payload = json.load(handle)
-        except (OSError, json.JSONDecodeError) as exc:
-            logger.warning("Konnte Cache-Datei nicht laden (%s): %s", self._cache_path, exc)
-            return
+            try:
+                with open(self._cache_path, "r", encoding="utf-8") as handle:
+                    payload = json.load(handle)
+            except (OSError, json.JSONDecodeError) as exc:
+                logger.warning("Konnte Cache-Datei nicht laden (%s): %s", self._cache_path, exc)
+                return
 
-        if not isinstance(payload, dict):
-            logger.warning("Cache-Datei hat unerwartetes Format (%s)", self._cache_path)
-            return
+            if not isinstance(payload, dict):
+                logger.warning("Cache-Datei hat unerwartetes Format (%s)", self._cache_path)
+                return
 
-        loaded = 0
-        for key, value in payload.items():
-            if isinstance(key, str) and isinstance(value, dict):
-                self._cache[key] = value
-                loaded += 1
+            loaded = 0
+            for key, value in payload.items():
+                if isinstance(key, str) and isinstance(value, dict):
+                    self._cache[key] = value
+                    loaded += 1
 
-        logger.info("Datei-Cache geladen: %d Einträge aus %s", loaded, self._cache_path)
+            logger.info("Datei-Cache geladen: %d Einträge aus %s", loaded, self._cache_path)
 
     def _persist_disk_cache(self) -> None:
         cache_dir = os.path.dirname(self._cache_path)
@@ -519,18 +528,32 @@ class PokeAPI:
             os.makedirs(cache_dir, exist_ok=True)
 
         with self._cache_lock:
-            payload = self._cache
-            fd, temp_path = tempfile.mkstemp(prefix="pokeapi-cache-", suffix=".json", dir=cache_dir or None)
-            try:
-                with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                    json.dump(payload, handle, ensure_ascii=False)
-                os.replace(temp_path, self._cache_path)
-            except OSError as exc:
-                logger.warning("Konnte Cache-Datei nicht schreiben (%s): %s", self._cache_path, exc)
+            with _DISK_CACHE_IO_LOCK:
+                merged_payload: Dict[str, Dict[str, Any]] = {}
+                if os.path.exists(self._cache_path):
+                    try:
+                        with open(self._cache_path, "r", encoding="utf-8") as handle:
+                            existing = json.load(handle)
+                        if isinstance(existing, dict):
+                            for key, value in existing.items():
+                                if isinstance(key, str) and isinstance(value, dict):
+                                    merged_payload[key] = value
+                    except (OSError, json.JSONDecodeError):
+                        pass
+
+                merged_payload.update(self._cache)
+                fd, temp_path = tempfile.mkstemp(prefix="pokeapi-cache-", suffix=".json", dir=cache_dir or None)
                 try:
-                    os.remove(temp_path)
-                except OSError:
-                    pass
+                    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                        json.dump(merged_payload, handle, ensure_ascii=False)
+                    os.replace(temp_path, self._cache_path)
+                    self._cache = merged_payload
+                except OSError as exc:
+                    logger.warning("Konnte Cache-Datei nicht schreiben (%s): %s", self._cache_path, exc)
+                    try:
+                        os.remove(temp_path)
+                    except OSError:
+                        pass
 
     def _maybe_persist_disk_cache(self, force: bool = False) -> None:
         if force:
